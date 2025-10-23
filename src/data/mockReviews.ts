@@ -1,0 +1,58 @@
+export const mockReviews = [
+  {
+    id: 1,
+    author: "Sarah Johnson",
+    rating: 5,
+    date: "2 days ago",
+    text: "Absolutely love this KFC! The staff are incredibly friendly and the food is always fresh and hot. The new chicken sandwich is amazing - highly recommend!",
+  },
+  {
+    id: 2,
+    author: "Michael Chen",
+    rating: 5,
+    date: "1 week ago",
+    text: "Best KFC in the area! Quick service even during busy hours. The restaurant is always clean and the staff go above and beyond. My family's favorite spot for a quick meal.",
+  },
+  {
+    id: 3,
+    author: "Emma Williams",
+    rating: 4,
+    date: "1 week ago",
+    text: "Great food quality and friendly staff. Sometimes the wait can be a bit long during lunch rush, but it's worth it. The popcorn chicken is delicious!",
+  },
+  {
+    id: 4,
+    author: "David Thompson",
+    rating: 5,
+    date: "2 weeks ago",
+    text: "Excellent service! The manager personally came to check if everything was okay. Food was perfect and the restaurant was spotless. Will definitely be coming back!",
+  },
+  {
+    id: 5,
+    author: "Rachel Martinez",
+    rating: 3,
+    date: "2 weeks ago",
+    text: "Food was good but my order was missing an item. Staff were apologetic and quickly fixed it. Overall decent experience.",
+  },
+  {
+    id: 6,
+    author: "James Wilson",
+    rating: 5,
+    date: "3 weeks ago",
+    text: "This location never disappoints! Fresh chicken every time, generous portions, and the drive-through service is super efficient. Love it!",
+  },
+  {
+    id: 7,
+    author: "Lucy Brown",
+    rating: 4,
+    date: "3 weeks ago",
+    text: "Very satisfied with my visit. The new spicy wings are fantastic! Staff were helpful in explaining the menu options. Clean dining area.",
+  },
+  {
+    id: 8,
+    author: "Tom Anderson",
+    rating: 5,
+    date: "1 month ago",
+    text: "Outstanding! Had a large family order and everything was perfect. Staff were patient with our questions and made great recommendations.",
+  },
+];
