@@ -14,7 +14,96 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      notification_settings: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          notify_on_rating: number[] | null
+          updated_at: string
+          whatsapp_number: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          notify_on_rating?: number[] | null
+          updated_at?: string
+          whatsapp_number: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          notify_on_rating?: number[] | null
+          updated_at?: string
+          whatsapp_number?: string
+        }
+        Relationships: []
+      }
+      reviews: {
+        Row: {
+          author_name: string
+          author_photo_url: string | null
+          created_at: string
+          google_review_id: string
+          id: string
+          rating: number
+          review_date: string
+          review_text: string | null
+          updated_at: string
+        }
+        Insert: {
+          author_name: string
+          author_photo_url?: string | null
+          created_at?: string
+          google_review_id: string
+          id?: string
+          rating: number
+          review_date: string
+          review_text?: string | null
+          updated_at?: string
+        }
+        Update: {
+          author_name?: string
+          author_photo_url?: string | null
+          created_at?: string
+          google_review_id?: string
+          id?: string
+          rating?: number
+          review_date?: string
+          review_text?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      sync_log: {
+        Row: {
+          error_message: string | null
+          id: string
+          new_reviews: number
+          reviews_fetched: number
+          status: string
+          synced_at: string
+        }
+        Insert: {
+          error_message?: string | null
+          id?: string
+          new_reviews?: number
+          reviews_fetched?: number
+          status: string
+          synced_at?: string
+        }
+        Update: {
+          error_message?: string | null
+          id?: string
+          new_reviews?: number
+          reviews_fetched?: number
+          status?: string
+          synced_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
