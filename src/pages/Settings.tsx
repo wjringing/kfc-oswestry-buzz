@@ -94,14 +94,24 @@ const Settings = () => {
     try {
       const { data, error } = await supabase.functions.invoke("sync-google-reviews");
 
-      if (error) throw error;
+      if (error) {
+        console.error("Sync error:", error);
+        toast.error(`Failed to sync: ${error.message || 'Unknown error'}`);
+        return;
+      }
+
+      if (data?.error) {
+        toast.error(`Failed to sync: ${data.error}`);
+        return;
+      }
 
       toast.success(
         `Synced ${data.new_reviews} new reviews out of ${data.reviews_fetched} total`
       );
     } catch (error) {
       console.error("Error syncing reviews:", error);
-      toast.error("Failed to sync reviews");
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      toast.error(`Failed to sync reviews: ${errorMessage}`);
     } finally {
       setIsSyncing(false);
     }
