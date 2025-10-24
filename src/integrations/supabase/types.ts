@@ -20,24 +20,24 @@ export type Database = {
           id: string
           is_active: boolean
           notify_on_rating: number[] | null
+          telegram_chat_id: string
           updated_at: string
-          whatsapp_number: string
         }
         Insert: {
           created_at?: string
           id?: string
           is_active?: boolean
           notify_on_rating?: number[] | null
+          telegram_chat_id?: string
           updated_at?: string
-          whatsapp_number: string
         }
         Update: {
           created_at?: string
           id?: string
           is_active?: boolean
           notify_on_rating?: number[] | null
+          telegram_chat_id?: string
           updated_at?: string
-          whatsapp_number?: string
         }
         Relationships: []
       }
