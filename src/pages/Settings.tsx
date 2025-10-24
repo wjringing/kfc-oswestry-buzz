@@ -26,10 +26,12 @@ const Settings = () => {
       const { data, error } = await supabase
         .from("notification_settings")
         .select("*")
-        .single();
+        .limit(1)
+        .maybeSingle();
 
-      if (error && error.code !== "PGRST116") {
-        throw error;
+      if (error) {
+        console.error("Error loading settings:", error);
+        return;
       }
 
       if (data) {
@@ -59,7 +61,8 @@ const Settings = () => {
       const { data: existing } = await supabase
         .from("notification_settings")
         .select("id")
-        .single();
+        .limit(1)
+        .maybeSingle();
 
       if (existing) {
         await supabase
@@ -90,15 +93,20 @@ const Settings = () => {
   };
 
   const handleSync = async () => {
+    if (!placeId.trim()) {
+      toast.error("Please enter your Google Place ID in settings first");
+      return;
+    }
+
     setIsSyncing(true);
     try {
       const response = await supabase.functions.invoke("sync-google-reviews");
 
-      console.log("Sync response:", response);
-
       if (response.error) {
-        console.error("Sync error:", response.error);
-        toast.error(`Failed to sync: ${response.error.message || 'Unknown error'}`);
+        const errorText = await response.error.context?.body?.text();
+        const errorData = errorText ? JSON.parse(errorText) : null;
+        const errorMessage = errorData?.error || response.error.message || 'Unknown error';
+        toast.error(`Failed to sync: ${errorMessage}`);
         return;
       }
 
