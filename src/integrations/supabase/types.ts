@@ -20,6 +20,7 @@ export type Database = {
           id: string
           is_active: boolean
           notify_on_rating: number[] | null
+          place_id: string | null
           telegram_chat_id: string
           updated_at: string
         }
@@ -28,6 +29,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           notify_on_rating?: number[] | null
+          place_id?: string | null
           telegram_chat_id?: string
           updated_at?: string
         }
@@ -36,6 +38,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           notify_on_rating?: number[] | null
+          place_id?: string | null
           telegram_chat_id?: string
           updated_at?: string
         }

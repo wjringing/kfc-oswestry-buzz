@@ -11,6 +11,7 @@ import { Link } from "react-router-dom";
 
 const Settings = () => {
   const [chatId, setChatId] = useState("");
+  const [placeId, setPlaceId] = useState("");
   const [isActive, setIsActive] = useState(true);
   const [notifyRatings, setNotifyRatings] = useState<number[]>([1, 2, 3]);
   const [loading, setLoading] = useState(false);
@@ -33,6 +34,7 @@ const Settings = () => {
 
       if (data) {
         setChatId(data.telegram_chat_id);
+        setPlaceId(data.place_id || "");
         setIsActive(data.is_active);
         setNotifyRatings(data.notify_on_rating || [1, 2, 3]);
       }
@@ -44,6 +46,11 @@ const Settings = () => {
   const handleSave = async () => {
     if (!chatId.trim()) {
       toast.error("Please enter your Telegram chat ID");
+      return;
+    }
+    
+    if (!placeId.trim()) {
+      toast.error("Please enter your Google Place ID");
       return;
     }
 
@@ -59,6 +66,7 @@ const Settings = () => {
           .from("notification_settings")
           .update({
             telegram_chat_id: chatId,
+            place_id: placeId,
             is_active: isActive,
             notify_on_rating: notifyRatings,
           })
@@ -66,6 +74,7 @@ const Settings = () => {
       } else {
         await supabase.from("notification_settings").insert({
           telegram_chat_id: chatId,
+          place_id: placeId,
           is_active: isActive,
           notify_on_rating: notifyRatings,
         });
@@ -127,6 +136,36 @@ const Settings = () => {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+              <div className="space-y-2">
+                <Label htmlFor="placeId">Google Place ID</Label>
+                <Input
+                  id="placeId"
+                  placeholder="e.g., ChIJN1t_tDeuEmsRUsoyG83frY4"
+                  value={placeId}
+                  onChange={(e) => setPlaceId(e.target.value)}
+                />
+                <p className="text-sm text-muted-foreground">
+                  Find your KFC Place ID:{" "}
+                  <a
+                    href="https://developers.google.com/maps/documentation/places/web-service/place-id"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:underline"
+                  >
+                    Search here
+                  </a>
+                  {" "}or use{" "}
+                  <a
+                    href="https://developers.google.com/maps/documentation/javascript/examples/places-placeid-finder"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:underline"
+                  >
+                    Place ID Finder
+                  </a>
+                </p>
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="chatId">Telegram Chat ID</Label>
                 <Input

@@ -29,12 +29,18 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Get Google Places API key
+    // Get notification settings to retrieve Place ID
+    const { data: settings, error: settingsError } = await supabase
+      .from('notification_settings')
+      .select('place_id')
+      .single();
+
+    if (settingsError || !settings?.place_id) {
+      throw new Error('Place ID not configured. Please set it in Settings.');
+    }
+
+    const placeId = settings.place_id;
     const apiKey = Deno.env.get('GOOGLE_PLACES_API_KEY')!;
-    
-    // KFC Place ID (you'll need to replace this with the actual KFC location)
-    // For now, using a demo place ID - user will need to update this
-    const placeId = 'ChIJN1t_tDeuEmsRUsoyG83frY4'; // This is Google Sydney - replace with actual KFC
     
     // Fetch reviews from Google Places API
     const placeUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=reviews&key=${apiKey}`;
