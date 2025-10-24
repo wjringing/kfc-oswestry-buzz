@@ -1,9 +1,10 @@
-import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
 interface GooglePlaceReview {
@@ -17,38 +18,47 @@ interface GooglePlaceReview {
   time: number;
 }
 
-serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, {
+      status: 200,
+      headers: corsHeaders,
+    });
   }
 
   try {
-    console.log('Starting Google Places review sync');
+    console.log("Starting Google Places review sync");
 
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Get notification settings to retrieve Place ID
     const { data: settings, error: settingsError } = await supabase
-      .from('notification_settings')
-      .select('place_id')
-      .single();
+      .from("notification_settings")
+      .select("place_id")
+      .maybeSingle();
 
-    if (settingsError || !settings?.place_id) {
-      throw new Error('Place ID not configured. Please set it in Settings.');
+    if (settingsError) {
+      throw new Error(`Settings error: ${settingsError.message}`);
+    }
+
+    if (!settings?.place_id) {
+      throw new Error("Place ID not configured. Please set it in Settings.");
     }
 
     const placeId = settings.place_id;
-    const apiKey = Deno.env.get('GOOGLE_PLACES_API_KEY')!;
+    const apiKey = Deno.env.get("GOOGLE_PLACES_API_KEY");
     
-    // Fetch reviews from Google Places API
+    if (!apiKey) {
+      throw new Error("Google Places API key not configured");
+    }
+
     const placeUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=reviews&key=${apiKey}`;
     const placeResponse = await fetch(placeUrl);
     const placeData = await placeResponse.json();
 
-    if (placeData.status !== 'OK') {
-      throw new Error(`Google Places API error: ${placeData.status}`);
+    if (placeData.status !== "OK") {
+      throw new Error(`Google Places API error: ${placeData.status} - ${placeData.error_message || "Unknown error"}`);
     }
 
     const reviews: GooglePlaceReview[] = placeData.result?.reviews || [];
@@ -56,22 +66,19 @@ serve(async (req) => {
 
     let newReviewsCount = 0;
 
-    // Process each review
     for (const review of reviews) {
       const reviewId = `${placeId}_${review.time}`;
       const reviewDate = new Date(review.time * 1000);
 
-      // Check if review already exists
       const { data: existing } = await supabase
-        .from('reviews')
-        .select('id')
-        .eq('google_review_id', reviewId)
-        .single();
+        .from("reviews")
+        .select("id")
+        .eq("google_review_id", reviewId)
+        .maybeSingle();
 
       if (!existing) {
-        // Insert new review
         const { error: insertError } = await supabase
-          .from('reviews')
+          .from("reviews")
           .insert({
             google_review_id: reviewId,
             author_name: review.author_name,
@@ -82,16 +89,15 @@ serve(async (req) => {
           });
 
         if (insertError) {
-          console.error('Error inserting review:', insertError);
+          console.error("Error inserting review:", insertError);
           continue;
         }
 
         newReviewsCount++;
         console.log(`New review added: ${reviewId}`);
 
-        // Send notification for new review
         try {
-          await supabase.functions.invoke('send-telegram-notification', {
+          await supabase.functions.invoke("send-telegram-notification", {
             body: {
               reviewId,
               authorName: review.author_name,
@@ -100,16 +106,15 @@ serve(async (req) => {
             },
           });
         } catch (notifError) {
-          console.error('Error sending notification:', notifError);
+          console.error("Error sending notification:", notifError);
         }
       }
     }
 
-    // Log sync
-    await supabase.from('sync_log').insert({
+    await supabase.from("sync_log").insert({
       reviews_fetched: reviews.length,
       new_reviews: newReviewsCount,
-      status: 'success',
+      status: "success",
     });
 
     console.log(`Sync complete: ${newReviewsCount} new reviews`);
@@ -120,27 +125,42 @@ serve(async (req) => {
         reviews_fetched: reviews.length,
         new_reviews: newReviewsCount,
       }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+      {
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json",
+        },
+        status: 200,
+      }
     );
   } catch (error) {
-    console.error('Error syncing reviews:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error("Error syncing reviews:", error);
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
 
-    // Log failed sync
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
-    
-    await supabase.from('sync_log').insert({
-      reviews_fetched: 0,
-      new_reviews: 0,
-      status: 'error',
-      error_message: errorMessage,
-    });
+    try {
+      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+      const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+      const supabase = createClient(supabaseUrl, supabaseKey);
+      
+      await supabase.from("sync_log").insert({
+        reviews_fetched: 0,
+        new_reviews: 0,
+        status: "error",
+        error_message: errorMessage,
+      });
+    } catch (logError) {
+      console.error("Failed to log error:", logError);
+    }
 
     return new Response(
       JSON.stringify({ error: errorMessage }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+      {
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json",
+        },
+        status: 500,
+      }
     );
   }
 });
