@@ -47,21 +47,31 @@ Deno.serve(async (req: Request) => {
     }
 
     const placeId = settings.place_id;
-    const apiKey = Deno.env.get("GOOGLE_PLACES_API_KEY");
+    const apiKey = Deno.env.get("SERPAPI_API_KEY");
     
     if (!apiKey) {
-      throw new Error("Google Places API key not configured");
+      throw new Error("SerpAPI key not configured");
     }
 
-    const placeUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=reviews&key=${apiKey}`;
-    const placeResponse = await fetch(placeUrl);
-    const placeData = await placeResponse.json();
+    // Use SerpAPI to get Google Maps reviews (supports more than 5 reviews)
+    const serpUrl = `https://serpapi.com/search.json?engine=google_maps_reviews&place_id=${placeId}&api_key=${apiKey}&num=100`;
+    const serpResponse = await fetch(serpUrl);
+    const serpData = await serpResponse.json();
 
-    if (placeData.status !== "OK") {
-      throw new Error(`Google Places API error: ${placeData.status} - ${placeData.error_message || "Unknown error"}`);
+    if (serpData.error) {
+      throw new Error(`SerpAPI error: ${serpData.error}`);
     }
 
-    const reviews: GooglePlaceReview[] = placeData.result?.reviews || [];
+    const reviews: GooglePlaceReview[] = (serpData.reviews || []).map((review: any) => ({
+      author_name: review.user?.name || "Anonymous",
+      author_url: review.user?.link || "",
+      language: review.language || "en",
+      profile_photo_url: review.user?.thumbnail || "",
+      rating: review.rating || 0,
+      relative_time_description: review.date || "",
+      text: review.snippet || review.review || "",
+      time: new Date(review.date || Date.now()).getTime() / 1000,
+    }));
     console.log(`Fetched ${reviews.length} reviews from Google Places`);
 
     let newReviewsCount = 0;
