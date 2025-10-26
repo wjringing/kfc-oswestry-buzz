@@ -47,6 +47,8 @@ serve(async (req: Request) => {
     }
 
     const placeId = settings.place_id;
+    console.log(`Using Place ID: ${placeId}`);
+    
     const apiKey = Deno.env.get("SERPAPI_API_KEY");
     
     if (!apiKey) {
@@ -64,6 +66,7 @@ serve(async (req: Request) => {
         ? `https://serpapi.com/search.json?engine=google_maps_reviews&next_page_token=${nextPageToken}&api_key=${apiKey}`
         : `https://serpapi.com/search.json?engine=google_maps_reviews&place_id=${placeId}&api_key=${apiKey}`;
       
+      console.log(`Fetching reviews from: ${serpUrl.replace(apiKey, 'HIDDEN')}`);
       const serpResponse: Response = await fetch(serpUrl);
       const serpData: any = await serpResponse.json();
 
