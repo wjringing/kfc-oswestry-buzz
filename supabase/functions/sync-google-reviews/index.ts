@@ -55,7 +55,6 @@ serve(async (req: Request) => {
       throw new Error("SerpAPI key not configured");
     }
 
-    // Use SerpAPI to get Google Maps reviews with pagination support
     let allReviews: GooglePlaceReview[] = [];
     let nextPageToken: string | null = null;
     let pageCount = 0;
@@ -74,16 +73,33 @@ serve(async (req: Request) => {
         throw new Error(`SerpAPI error: ${serpData.error}`);
       }
 
-      const pageReviews = (serpData.reviews || []).map((review: any) => ({
-        author_name: review.user?.name || "Anonymous",
-        author_url: review.user?.link || "",
-        language: review.language || "en",
-        profile_photo_url: review.user?.thumbnail || "",
-        rating: review.rating || 0,
-        relative_time_description: review.date || "",
-        text: review.snippet || review.review || "",
-        time: new Date(review.date || Date.now()).getTime() / 1000,
-      }));
+      const pageReviews = (serpData.reviews || []).map((review: any) => {
+        let timestamp: number;
+        try {
+          if (review.iso_date_of_last_edit) {
+            timestamp = new Date(review.iso_date_of_last_edit).getTime() / 1000;
+          } else if (review.date) {
+            const parsed = new Date(review.date);
+            timestamp = isNaN(parsed.getTime()) ? Date.now() / 1000 : parsed.getTime() / 1000;
+          } else {
+            timestamp = Date.now() / 1000;
+          }
+        } catch (e) {
+          console.error("Error parsing date:", e, "review:", review);
+          timestamp = Date.now() / 1000;
+        }
+
+        return {
+          author_name: review.user?.name || "Anonymous",
+          author_url: review.user?.link || "",
+          language: review.language || "en",
+          profile_photo_url: review.user?.thumbnail || "",
+          rating: review.rating || 0,
+          relative_time_description: review.date || "",
+          text: review.snippet || review.review || "",
+          time: timestamp,
+        };
+      });
 
       allReviews = [...allReviews, ...pageReviews];
       nextPageToken = serpData.serpapi_pagination?.next_page_token || null;
