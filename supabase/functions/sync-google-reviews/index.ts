@@ -57,15 +57,16 @@ serve(async (req: Request) => {
 
     // Use SerpAPI to get Google Maps reviews with pagination support
     let allReviews: GooglePlaceReview[] = [];
-    let nextPageToken = null;
+    let nextPageToken: string | null = null;
     let pageCount = 0;
-    const maxPages = 10; // Limit to 10 pages to avoid excessive API calls
+    const maxPages = 10;
 
-    const serpUrl: string = nextPageToken 
-     ? `https://serpapi.com/search.json?engine=google_maps_reviews&place_id=${placeId}&next_page_token=${nextPageToken}&api_key=${apiKey}`
-     : `https://serpapi.com/search.json?engine=google_maps_reviews&place_id=${placeId}&api_key=${apiKey}`;
+    do {
+      const serpUrl: string = nextPageToken
+       ? `https://serpapi.com/search.json?engine=google_maps_reviews&place_id=${placeId}&next_page_token=${nextPageToken}&api_key=${apiKey}`
+       : `https://serpapi.com/search.json?engine=google_maps_reviews&place_id=${placeId}&api_key=${apiKey}`;
 
-      console.log(`Fetching reviews from: ${serpUrl.replace(apiKey, 'HIDDEN')}`);
+      console.log(`Fetching reviews page ${pageCount + 1} from: ${serpUrl.replace(apiKey, 'HIDDEN')}`);
       const serpResponse: Response = await fetch(serpUrl);
       const serpData: any = await serpResponse.json();
 
@@ -89,6 +90,10 @@ serve(async (req: Request) => {
       pageCount++;
 
       console.log(`Fetched page ${pageCount}: ${pageReviews.length} reviews (total: ${allReviews.length})`);
+
+      if (nextPageToken && pageCount < maxPages) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
     } while (nextPageToken && pageCount < maxPages);
 
     const reviews = allReviews;
