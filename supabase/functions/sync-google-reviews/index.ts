@@ -61,11 +61,10 @@ serve(async (req: Request) => {
     let pageCount = 0;
     const maxPages = 10; // Limit to 10 pages to avoid excessive API calls
 
-    do {
-      const serpUrl: string = nextPageToken 
-        ? `https://serpapi.com/search.json?engine=google_maps_reviews&next_page_token=${nextPageToken}&api_key=${apiKey}`
-        : `https://serpapi.com/search.json?engine=google_maps_reviews&place_id=${placeId}&api_key=${apiKey}`;
-      
+const serpUrl: string = nextPageToken 
+  ? `https://serpapi.com/search.json?engine=google_maps_reviews&place_id=${placeId}&next_page_token=${nextPageToken}&api_key=${apiKey}`
+  : `https://serpapi.com/search.json?engine=google_maps_reviews&place_id=${placeId}&api_key=${apiKey}`;
+
       console.log(`Fetching reviews from: ${serpUrl.replace(apiKey, 'HIDDEN')}`);
       const serpResponse: Response = await fetch(serpUrl);
       const serpData: any = await serpResponse.json();
