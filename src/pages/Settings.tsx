@@ -6,10 +6,11 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { ArrowLeft, Bell, BellOff } from "lucide-react";
-import { Link } from "react-router-dom";
+import { ArrowLeft, Bell, BellOff, LogOut } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
 
 const Settings = () => {
+  const navigate = useNavigate();
   const [chatId, setChatId] = useState("");
   const [placeId, setPlaceId] = useState("");
   const [isActive, setIsActive] = useState(true);
@@ -18,8 +19,15 @@ const Settings = () => {
   const [isSyncing, setIsSyncing] = useState(false);
 
   useEffect(() => {
-    loadSettings();
-  }, []);
+    // Check authentication
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) {
+        navigate("/auth");
+        return;
+      }
+      loadSettings();
+    });
+  }, [navigate]);
 
   const loadSettings = async () => {
     try {
@@ -139,15 +147,26 @@ const Settings = () => {
     }
   };
 
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    navigate("/auth");
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto px-6 py-12">
-        <Link to="/">
-          <Button variant="ghost" className="mb-6">
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Dashboard
+        <div className="flex justify-between items-center mb-6">
+          <Link to="/">
+            <Button variant="ghost">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to Dashboard
+            </Button>
+          </Link>
+          <Button variant="outline" onClick={handleSignOut}>
+            <LogOut className="mr-2 h-4 w-4" />
+            Sign Out
           </Button>
-        </Link>
+        </div>
 
         <h1 className="text-4xl font-bold text-foreground mb-8">Settings</h1>
 

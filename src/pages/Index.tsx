@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import Hero from "@/components/Hero";
 import MetricsCard from "@/components/MetricsCard";
 import ReviewCard from "@/components/ReviewCard";
@@ -9,6 +10,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const Index = () => {
+  const navigate = useNavigate();
   const [reviews, setReviews] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
@@ -18,7 +20,21 @@ const Index = () => {
   });
 
   useEffect(() => {
-    loadReviews();
+    // Check authentication
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) {
+        navigate("/auth");
+        return;
+      }
+      loadReviews();
+    });
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!session) {
+        navigate("/auth");
+      }
+    });
 
     // Subscribe to realtime updates
     const channel = supabase
@@ -38,8 +54,9 @@ const Index = () => {
 
     return () => {
       supabase.removeChannel(channel);
+      subscription.unsubscribe();
     };
-  }, []);
+  }, [navigate]);
 
   const loadReviews = async () => {
     try {
