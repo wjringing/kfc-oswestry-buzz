@@ -53,26 +53,44 @@ serve(async (req: Request) => {
       throw new Error("SerpAPI key not configured");
     }
 
-    // Use SerpAPI to get Google Maps reviews (supports more than 5 reviews)
-    const serpUrl = `https://serpapi.com/search.json?engine=google_maps_reviews&place_id=${placeId}&api_key=${apiKey}&num=100`;
-    const serpResponse = await fetch(serpUrl);
-    const serpData = await serpResponse.json();
+    // Use SerpAPI to get Google Maps reviews with pagination support
+    let allReviews: GooglePlaceReview[] = [];
+    let nextPageToken = null;
+    let pageCount = 0;
+    const maxPages = 10; // Limit to 10 pages to avoid excessive API calls
 
-    if (serpData.error) {
-      throw new Error(`SerpAPI error: ${serpData.error}`);
-    }
+    do {
+      const serpUrl: string = nextPageToken 
+        ? `https://serpapi.com/search.json?engine=google_maps_reviews&next_page_token=${nextPageToken}&api_key=${apiKey}`
+        : `https://serpapi.com/search.json?engine=google_maps_reviews&place_id=${placeId}&api_key=${apiKey}`;
+      
+      const serpResponse: Response = await fetch(serpUrl);
+      const serpData: any = await serpResponse.json();
 
-    const reviews: GooglePlaceReview[] = (serpData.reviews || []).map((review: any) => ({
-      author_name: review.user?.name || "Anonymous",
-      author_url: review.user?.link || "",
-      language: review.language || "en",
-      profile_photo_url: review.user?.thumbnail || "",
-      rating: review.rating || 0,
-      relative_time_description: review.date || "",
-      text: review.snippet || review.review || "",
-      time: new Date(review.date || Date.now()).getTime() / 1000,
-    }));
-    console.log(`Fetched ${reviews.length} reviews from Google Places`);
+      if (serpData.error) {
+        throw new Error(`SerpAPI error: ${serpData.error}`);
+      }
+
+      const pageReviews = (serpData.reviews || []).map((review: any) => ({
+        author_name: review.user?.name || "Anonymous",
+        author_url: review.user?.link || "",
+        language: review.language || "en",
+        profile_photo_url: review.user?.thumbnail || "",
+        rating: review.rating || 0,
+        relative_time_description: review.date || "",
+        text: review.snippet || review.review || "",
+        time: new Date(review.date || Date.now()).getTime() / 1000,
+      }));
+
+      allReviews = [...allReviews, ...pageReviews];
+      nextPageToken = serpData.serpapi_pagination?.next_page_token || null;
+      pageCount++;
+
+      console.log(`Fetched page ${pageCount}: ${pageReviews.length} reviews (total: ${allReviews.length})`);
+    } while (nextPageToken && pageCount < maxPages);
+
+    const reviews = allReviews;
+    console.log(`Fetched total of ${reviews.length} reviews from Google Places`);
 
     let newReviewsCount = 0;
 

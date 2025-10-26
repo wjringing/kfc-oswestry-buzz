@@ -111,10 +111,7 @@ const Settings = () => {
       const response = await supabase.functions.invoke("sync-google-reviews");
 
       if (response.error) {
-        const errorText = await response.error.context?.body?.text();
-        const errorData = errorText ? JSON.parse(errorText) : null;
-        const errorMessage = errorData?.error || response.error.message || 'Unknown error';
-        toast.error(`Failed to sync: ${errorMessage}`);
+        toast.error(`Failed to sync: ${response.error.message || 'Unknown error'}`);
         return;
       }
 
