@@ -62,8 +62,8 @@ serve(async (req: Request) => {
 
     do {
       const serpUrl: string = nextPageToken
-       ? `https://serpapi.com/search.json?engine=google_maps_reviews&place_id=${placeId}&next_page_token=${nextPageToken}&api_key=${apiKey}`
-       : `https://serpapi.com/search.json?engine=google_maps_reviews&place_id=${placeId}&api_key=${apiKey}`;
+       ? `https://serpapi.com/search.json?engine=google_maps_reviews&place_id=${placeId}&sort_by=newestFirst&next_page_token=${nextPageToken}&api_key=${apiKey}`
+       : `https://serpapi.com/search.json?engine=google_maps_reviews&place_id=${placeId}&sort_by=newestFirst&api_key=${apiKey}`;
 
       console.log(`Fetching reviews page ${pageCount + 1} from: ${serpUrl.replace(apiKey, 'HIDDEN')}`);
       const serpResponse: Response = await fetch(serpUrl);
