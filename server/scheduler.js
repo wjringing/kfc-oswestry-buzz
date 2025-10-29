@@ -193,3 +193,13 @@ async function runScheduler() {
 
 // Start scheduler
 runScheduler();
+await supabase.rpc("refresh_review_summary");
+
+await fetch(`${process.env.SUPABASE_URL}/rest/v1/rpc/refresh_review_summary`, {
+  method: "POST",
+  headers: {
+    apiKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+    Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+  },
+});
+
