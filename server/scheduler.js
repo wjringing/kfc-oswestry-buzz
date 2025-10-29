@@ -1,84 +1,195 @@
-import cron from "node-cron";
-import { fetchGoogleReviews } from "./googleReviews.js";
-import { sendTelegramMessage } from "./telegram.js";
-import { readFileSync, writeFileSync, existsSync } from "fs";
-import dotenv from "dotenv";
+// scheduler.cjs
+const cron = require("node-cron");
+const dotenv = require("dotenv");
+const axios = require("axios");
+const { createClient } = require("@supabase/supabase-js");
+
+// Load environment variables
 dotenv.config();
+const {
+  SUPABASE_SERVICE_ROLE_KEY,
+  VITE_SUPABASE_URL,
+  SERPAPI_KEY,
+  PLACE_ID,
+  TELEGRAM_BOT_TOKEN,
+  TELEGRAM_CHAT_ID,
+} = process.env;
 
-const REVIEW_TRACKER_FILE = "./lastReviews.json";
-
-function getLastReviews() {
-  try {
-    if (existsSync(REVIEW_TRACKER_FILE)) {
-      const data = readFileSync(REVIEW_TRACKER_FILE, "utf8");
-      return JSON.parse(data);
-    }
-  } catch (err) {
-    console.error("Error reading review tracker:", err.message);
-  }
-  return [];
+// Validate env vars
+if (!SUPABASE_SERVICE_ROLE_KEY || !VITE_SUPABASE_URL || !SERPAPI_KEY || !PLACE_ID) {
+  console.error("❌ Missing required environment variables.");
+  process.exit(1);
 }
 
-function saveLastReviews(reviews) {
+// Supabase client
+const supabase = createClient(VITE_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+// Telegram message sender
+async function sendTelegramNotification(message) {
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
   try {
-    writeFileSync(REVIEW_TRACKER_FILE, JSON.stringify(reviews, null, 2));
+    await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      chat_id: TELEGRAM_CHAT_ID,
+      text: message,
+    });
   } catch (err) {
-    console.error("Error saving review tracker:", err.message);
+    console.error("🚨 Telegram send failed:", err.message);
   }
 }
 
-async function runJob() {
-  try {
-    console.log(`[${new Date().toISOString()}] Fetching Google reviews...`);
-    const reviews = await fetchGoogleReviews();
+// Fetch Google reviews via SerpAPI
+async function fetchReviews() {
+  const url = `https://serpapi.com/search.json?engine=google_maps_reviews&place_id=${PLACE_ID}&api_key=${SERPAPI_KEY}`;
+  const { data } = await axios.get(url);
+  return (data.reviews || []).map((r) => ({
+    google_review_id: r.review_id,
+    author_name: r.user?.name || null,
+    author_photo_url: r.user?.thumbnail || null,
+    rating: r.rating || null,
+    review_text: r.text || null,
+    review_date: r.time ? new Date(r.time * 1000).toISOString() : null,
+    fetched_at: new Date().toISOString(),
+  }));
+}
 
+// Insert only new reviews and log the results
+async function syncReviews(trigger = "auto") {
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] Fetching Google reviews...`);
+
+  try {
+    const reviews = await fetchReviews();
     if (!reviews.length) {
-      console.log("No reviews found from API.");
-      await sendTelegramMessage("ℹ️ <b>Review Check Complete</b>\n\nNo reviews found at this time.");
+      console.log("⚠️ No reviews returned from SerpAPI.");
+      await supabase.from("review_sync_logs").insert({
+        created_at: new Date().toISOString(),
+        status: "empty",
+        review_count: 0,
+        inserted_count: 0,
+        message: "No reviews returned from SerpAPI.",
+      });
+      await sendTelegramNotification("⚠️ No reviews returned from SerpAPI.");
       return;
     }
 
-    // Get previously seen reviews
-    const lastReviews = getLastReviews();
-    const lastReviewIds = new Set(lastReviews.map(r => `${r.user}_${r.date}`));
-    
-    // Find new reviews
-    const newReviews = reviews.filter(r => {
-      const reviewId = `${r.user}_${r.date}`;
-      return !lastReviewIds.has(reviewId);
-    });
+    const { data: existing, error: fetchError } = await supabase
+      .from("reviews")
+      .select("google_review_id");
+    if (fetchError) throw fetchError;
 
-    if (newReviews.length === 0) {
-      console.log("No new reviews since last check.");
-      await sendTelegramMessage("✅ <b>Review Check Complete</b>\n\nNo new reviews since last check.");
+    const existingIds = new Set(existing.map((r) => r.google_review_id));
+    const newReviews = reviews.filter((r) => !existingIds.has(r.google_review_id));
+
+    if (newReviews.length > 0) {
+      const { error: insertError } = await supabase.from("reviews").insert(newReviews);
+      if (insertError) throw insertError;
+      console.log(`✅ Inserted ${newReviews.length} new reviews into Supabase.`);
+
+      await supabase.from("review_sync_logs").insert({
+        created_at: new Date().toISOString(),
+        status: "success",
+        review_count: reviews.length,
+        inserted_count: newReviews.length,
+        message: `Inserted ${newReviews.length} new reviews (${trigger}).`,
+      });
+
+      await sendTelegramNotification(`⭐ ${newReviews.length} new Google review(s) added!`);
     } else {
-      const latest = newReviews.slice(0, 10); // Show up to 10 new reviews
-      let msg = `⭐ <b>New Google Reviews for KFC Oswestry</b> ⭐\n\n`;
-      msg += `📊 <b>${newReviews.length} new review${newReviews.length > 1 ? 's' : ''}</b> found\n\n`;
-      
-      for (const r of latest) {
-        msg += `👤 <b>${r.user || "Anonymous"}</b>\n⭐ ${r.rating}/5\n"${r.snippet || ""}"\n🕒 ${r.date}\n\n`;
-      }
-
-      if (newReviews.length > 10) {
-        msg += `... and ${newReviews.length - 10} more\n`;
-      }
-
-      await sendTelegramMessage(msg);
-      console.log(`✅ Sent ${newReviews.length} new reviews to Telegram.`);
+      console.log("📭 No new reviews found.");
+      await supabase.from("review_sync_logs").insert({
+        created_at: new Date().toISOString(),
+        status: "no_new_reviews",
+        review_count: reviews.length,
+        inserted_count: 0,
+        message: `No new reviews found (${trigger}).`,
+      });
+      await sendTelegramNotification("📭 No new reviews found.");
     }
-
-    // Save current reviews for next comparison
-    saveLastReviews(reviews.slice(0, 50)); // Keep last 50 reviews
   } catch (err) {
-    console.error("❌ Error running scheduled job:", err.message);
+    console.error("❌ Error fetching/syncing:", err.message);
+    await supabase.from("review_sync_logs").insert({
+      created_at: new Date().toISOString(),
+      status: "error",
+      review_count: 0,
+      inserted_count: 0,
+      message: err.message,
+    });
+    await sendTelegramNotification(`🚨 Error fetching reviews: ${err.message}`);
   }
 }
 
-// Run immediately on startup
-runJob();
+// Generate daily or weekly summary
+async function sendSummary(type = "day") {
+  const now = new Date();
+  const start =
+    type === "week"
+      ? new Date(now.setDate(now.getDate() - now.getDay())) // start of week (Sunday)
+      : new Date(now.setHours(0, 0, 0, 0)); // start of today
 
-// Schedule for 9am, 3pm, and 9pm daily
-cron.schedule("0 9,15,21 * * *", runJob);
+  const { data, error } = await supabase
+    .from("review_sync_logs")
+    .select("inserted_count, created_at")
+    .gte("created_at", start.toISOString());
 
-console.log("📅 Scheduler started. Will run at 9am, 3pm, and 9pm daily.");
+  if (error) {
+    console.error("Summary query failed:", error.message);
+    return;
+  }
+
+  const total = data.reduce((sum, r) => sum + (r.inserted_count || 0), 0);
+  const label = type === "week" ? "this week" : "today";
+
+  await supabase.from("review_sync_logs").insert({
+    created_at: new Date().toISOString(),
+    status: `summary_${type}`,
+    review_count: data.length,
+    inserted_count: total,
+    message: `📊 Summary: ${total} new reviews ${label}.`,
+  });
+
+  await sendTelegramNotification(`📊 Summary: ${total} new reviews ${label}.`);
+}
+
+// Send heartbeat ping at midnight
+async function sendHeartbeat() {
+  const now = new Date().toLocaleString("en-GB", { timeZone: "Europe/London" });
+  await sendTelegramNotification(`💤 Heartbeat OK – scheduler alive at ${now}`);
+  console.log(`[${now}] ✅ Heartbeat sent`);
+}
+
+// Scheduler setup
+async function runScheduler() {
+  console.log("📅 Scheduler started. Will run at 9am, 3pm, 9pm & midnight daily.");
+  await sendTelegramNotification("🕓 Scheduler started on review.ringing.org.uk ✅");
+
+  // 9am: sync + weekly summary
+  cron.schedule("0 9 * * *", async () => {
+    await syncReviews("9am");
+    await sendSummary("week");
+  });
+
+  // 3pm: mid-day sync only
+  cron.schedule("0 15 * * *", async () => {
+    await syncReviews("3pm");
+  });
+
+  // 9pm: sync + daily summary
+  cron.schedule("0 21 * * *", async () => {
+    await syncReviews("9pm");
+    await sendSummary("day");
+  });
+
+  // Midnight heartbeat
+  cron.schedule("0 0 * * *", async () => {
+    await sendHeartbeat();
+  });
+
+  // Manual trigger
+  if (process.argv.includes("--force")) {
+    console.log("⚡ Running immediate review fetch (--force mode)...");
+    await syncReviews("manual");
+  }
+}
+
+// Start scheduler
+runScheduler();
