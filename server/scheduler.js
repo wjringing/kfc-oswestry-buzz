@@ -1,205 +1,188 @@
-// scheduler.cjs
+/**
+ * KFC Review Scheduler - Multi-location + Admin Heartbeat
+ * Runs at 9am, 3pm, 9pm (Europe/London)
+ * Heartbeat daily at 00:00, Weekly summary Sunday 21:00
+ */
+
 const cron = require("node-cron");
-const dotenv = require("dotenv");
 const axios = require("axios");
+const dotenv = require("dotenv");
 const { createClient } = require("@supabase/supabase-js");
+const os = require("os");
 
-// Load environment variables
 dotenv.config();
-const {
-  SUPABASE_SERVICE_ROLE_KEY,
-  VITE_SUPABASE_URL,
-  SERPAPI_KEY,
-  PLACE_ID,
-  TELEGRAM_BOT_TOKEN,
-  TELEGRAM_CHAT_ID,
-} = process.env;
 
-// Validate env vars
-if (!SUPABASE_SERVICE_ROLE_KEY || !VITE_SUPABASE_URL || !SERPAPI_KEY || !PLACE_ID) {
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SERPAPI_KEY = process.env.SERPAPI_KEY;
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+
+if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !SERPAPI_KEY || !TELEGRAM_BOT_TOKEN) {
   console.error("❌ Missing required environment variables.");
   process.exit(1);
 }
 
-// Supabase client
-const supabase = createClient(VITE_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  auth: { persistSession: false },
+});
 
-// Telegram message sender
-async function sendTelegramNotification(message) {
-  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
+const TZ = "Europe/London";
+const schedulerStart = Date.now();
+let lastRunTime = null;
+
+async function sendTelegram(chatId, message, parseMode = "HTML") {
   try {
     await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-      chat_id: TELEGRAM_CHAT_ID,
+      chat_id: chatId,
       text: message,
+      parse_mode: parseMode,
     });
   } catch (err) {
     console.error("🚨 Telegram send failed:", err.message);
   }
 }
 
-// Fetch Google reviews via SerpAPI
-async function fetchReviews() {
-  const url = `https://serpapi.com/search.json?engine=google_maps_reviews&place_id=${PLACE_ID}&api_key=${SERPAPI_KEY}`;
-  const { data } = await axios.get(url);
-  return (data.reviews || []).map((r) => ({
-    google_review_id: r.review_id,
-    author_name: r.user?.name || null,
-    author_photo_url: r.user?.thumbnail || null,
-    rating: r.rating || null,
-    review_text: r.text || null,
-    review_date: r.time ? new Date(r.time * 1000).toISOString() : null,
-    fetched_at: new Date().toISOString(),
-  }));
-}
-
-// Insert only new reviews and log the results
-async function syncReviews(trigger = "auto") {
-  const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] Fetching Google reviews...`);
-
-  try {
-    const reviews = await fetchReviews();
-    if (!reviews.length) {
-      console.log("⚠️ No reviews returned from SerpAPI.");
-      await supabase.from("review_sync_logs").insert({
-        created_at: new Date().toISOString(),
-        status: "empty",
-        review_count: 0,
-        inserted_count: 0,
-        message: "No reviews returned from SerpAPI.",
-      });
-      await sendTelegramNotification("⚠️ No reviews returned from SerpAPI.");
-      return;
-    }
-
-    const { data: existing, error: fetchError } = await supabase
-      .from("reviews")
-      .select("google_review_id");
-    if (fetchError) throw fetchError;
-
-    const existingIds = new Set(existing.map((r) => r.google_review_id));
-    const newReviews = reviews.filter((r) => !existingIds.has(r.google_review_id));
-
-    if (newReviews.length > 0) {
-      const { error: insertError } = await supabase.from("reviews").insert(newReviews);
-      if (insertError) throw insertError;
-      console.log(`✅ Inserted ${newReviews.length} new reviews into Supabase.`);
-
-      await supabase.from("review_sync_logs").insert({
-        created_at: new Date().toISOString(),
-        status: "success",
-        review_count: reviews.length,
-        inserted_count: newReviews.length,
-        message: `Inserted ${newReviews.length} new reviews (${trigger}).`,
-      });
-
-      await sendTelegramNotification(`⭐ ${newReviews.length} new Google review(s) added!`);
-    } else {
-      console.log("📭 No new reviews found.");
-      await supabase.from("review_sync_logs").insert({
-        created_at: new Date().toISOString(),
-        status: "no_new_reviews",
-        review_count: reviews.length,
-        inserted_count: 0,
-        message: `No new reviews found (${trigger}).`,
-      });
-      await sendTelegramNotification("📭 No new reviews found.");
-    }
-  } catch (err) {
-    console.error("❌ Error fetching/syncing:", err.message);
-    await supabase.from("review_sync_logs").insert({
-      created_at: new Date().toISOString(),
-      status: "error",
-      review_count: 0,
-      inserted_count: 0,
-      message: err.message,
-    });
-    await sendTelegramNotification(`🚨 Error fetching reviews: ${err.message}`);
-  }
-}
-
-// Generate daily or weekly summary
-async function sendSummary(type = "day") {
-  const now = new Date();
-  const start =
-    type === "week"
-      ? new Date(now.setDate(now.getDate() - now.getDay())) // start of week (Sunday)
-      : new Date(now.setHours(0, 0, 0, 0)); // start of today
-
+async function fetchAdminChatId() {
   const { data, error } = await supabase
-    .from("review_sync_logs")
-    .select("inserted_count, created_at")
-    .gte("created_at", start.toISOString());
+    .from("locations")
+    .select("telegram_chat_id")
+    .is("place_id", null)
+    .eq("active", true)
+    .maybeSingle();
+
+  if (error) console.error("❌ Failed to fetch admin chat ID:", error.message);
+  return data ? data.telegram_chat_id : null;
+}
+
+async function fetchActiveLocations() {
+  const { data, error } = await supabase
+    .from("locations")
+    .select("id, name, place_id, telegram_chat_id")
+    .eq("active", true)
+    .not("place_id", "is", null);
 
   if (error) {
-    console.error("Summary query failed:", error.message);
-    return;
+    console.error("❌ Error fetching locations:", error.message);
+    return [];
   }
+  return data || [];
+}
 
-  const total = data.reduce((sum, r) => sum + (r.inserted_count || 0), 0);
-  const label = type === "week" ? "this week" : "today";
+async function fetchGoogleReviews(placeId) {
+  const url = `https://serpapi.com/search.json?engine=google_maps_reviews&hl=en&place_id=${placeId}&api_key=${SERPAPI_KEY}`;
+  const { data } = await axios.get(url);
+  return data.reviews || [];
+}
 
+async function insertReviews(location, reviews) {
+  const { data: existing } = await supabase
+    .from("reviews")
+    .select("google_review_id")
+    .eq("location_id", location.id);
+
+  const existingIds = new Set(existing.map((r) => r.google_review_id));
+  const newReviews = reviews.filter((r) => !existingIds.has(r.review_id));
+
+  if (newReviews.length === 0) return 0;
+
+  const formatted = newReviews.map((r) => ({
+    location_id: location.id,
+    google_review_id: r.review_id,
+    author_name: r.author_title || r.author_name,
+    profile_photo_url: r.profile_photo_url,
+    rating: r.rating,
+    review_text: r.text,
+    review_date: new Date().toISOString(),
+    fetched_at: new Date().toISOString(),
+  }));
+
+  const { error } = await supabase.from("reviews").insert(formatted);
+  if (error) throw new Error(error.message);
+  return formatted.length;
+}
+
+async function logSync(status, locationName, count, message = null) {
   await supabase.from("review_sync_logs").insert({
+    status,
+    message: message || status,
+    inserted_count: count,
+    review_count: count,
     created_at: new Date().toISOString(),
-    status: `summary_${type}`,
-    review_count: data.length,
-    inserted_count: total,
-    message: `📊 Summary: ${total} new reviews ${label}.`,
   });
-
-  await sendTelegramNotification(`📊 Summary: ${total} new reviews ${label}.`);
 }
 
-// Send heartbeat ping at midnight
-async function sendHeartbeat() {
-  const now = new Date().toLocaleString("en-GB", { timeZone: "Europe/London" });
-  await sendTelegramNotification(`💤 Heartbeat OK – scheduler alive at ${now}`);
-  console.log(`[${now}] ✅ Heartbeat sent`);
-}
-
-// Scheduler setup
 async function runScheduler() {
-  console.log("📅 Scheduler started. Will run at 9am, 3pm, 9pm & midnight daily.");
-  await sendTelegramNotification("🕓 Scheduler started on review.ringing.org.uk ✅");
+  const adminChat = await fetchAdminChatId();
+  const locations = await fetchActiveLocations();
+  lastRunTime = new Date().toLocaleString("en-GB", { timeZone: TZ });
 
-  // 9am: sync + weekly summary
-  cron.schedule("0 9 * * *", async () => {
-    await syncReviews("9am");
-    await sendSummary("week");
-  });
+  for (const loc of locations) {
+    try {
+      const reviews = await fetchGoogleReviews(loc.place_id);
+      const inserted = await insertReviews(loc, reviews);
 
-  // 3pm: mid-day sync only
-  cron.schedule("0 15 * * *", async () => {
-    await syncReviews("3pm");
-  });
+      if (inserted > 0) {
+        await sendTelegram(
+          loc.telegram_chat_id,
+          `✅ <b>${loc.name}</b>: ${inserted} new review${inserted > 1 ? "s" : ""} added ⭐`
+        );
+      } else {
+        await sendTelegram(loc.telegram_chat_id, `ℹ️ <b>${loc.name}</b>: No new reviews found`);
+      }
 
-  // 9pm: sync + daily summary
-  cron.schedule("0 21 * * *", async () => {
-    await syncReviews("9pm");
-    await sendSummary("day");
-  });
-
-  // Midnight heartbeat
-  cron.schedule("0 0 * * *", async () => {
-    await sendHeartbeat();
-  });
-
-  // Manual trigger
-  if (process.argv.includes("--force")) {
-    console.log("⚡ Running immediate review fetch (--force mode)...");
-    await syncReviews("manual");
+      await logSync("success", loc.name, inserted, "Sync completed");
+    } catch (err) {
+      console.error(`❌ Error syncing ${loc.name}:`, err.message);
+      await logSync("error", loc.name, 0, err.message);
+    }
   }
+
+  if (adminChat)
+    await sendTelegram(adminChat, `📦 Review sync completed for ${locations.length} location(s).`);
 }
 
-// Start scheduler
-runScheduler();
-await supabase.rpc("refresh_review_summary");
+// --- Heartbeat @ 00:00 (London) ---
+cron.schedule("0 0 * * *", async () => {
+  const adminChat = await fetchAdminChatId();
+  if (!adminChat) return;
 
-await fetch(`${process.env.SUPABASE_URL}/rest/v1/rpc/refresh_review_summary`, {
-  method: "POST",
-  headers: {
-    apiKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
-    Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
-  },
-});
+  const uptimeMs = Date.now() - schedulerStart;
+  const uptimeHrs = Math.floor(uptimeMs / 3600000);
+  const uptimeDays = Math.floor(uptimeHrs / 24);
+  const uptimeMins = Math.floor((uptimeMs % 3600000) / 60000);
+  const memoryMB = Math.round(process.memoryUsage().rss / 1024 / 1024);
 
+  const msg = `✅ <b>Scheduler Heartbeat OK</b>\n` +
+              `Uptime: ${uptimeDays}d ${uptimeHrs % 24}h ${uptimeMins}m\n` +
+              `Last run: ${lastRunTime || "N/A"}\n` +
+              `Next run: 09:00\n` +
+              `Memory: ${memoryMB} MB`;
+
+  await sendTelegram(adminChat, msg);
+}, { timezone: TZ });
+
+// --- Main schedule (9am, 3pm, 9pm London) ---
+cron.schedule("0 9,15,21 * * *", runScheduler, { timezone: TZ });
+
+// --- Weekly summary Sunday 21:00 ---
+cron.schedule("0 21 * * 0", async () => {
+  const adminChat = await fetchAdminChatId();
+  if (!adminChat) return;
+
+  const { data, error } = await supabase.rpc("get_weekly_review_counts");
+  if (error) return console.error("Error fetching weekly counts:", error.message);
+
+  const chartUrl = `https://quickchart.io/chart?c={type:'bar',data:{labels:${JSON.stringify(
+    data.map((d) => d.day)
+  )},datasets:[{label:'Reviews',data:${JSON.stringify(data.map((d) => d.count))}]}}`;
+
+  await sendTelegram(adminChat, `📊 <b>Weekly Review Summary</b>\n${chartUrl}`);
+}, { timezone: TZ });
+
+// --- Immediate run with --force flag ---
+if (process.argv.includes("--force")) {
+  console.log("⚡ Running immediate review fetch (--force mode)...");
+  runScheduler();
+}
+
+console.log("📅 Scheduler started. Will run at 9am, 3pm, 9pm daily.");
